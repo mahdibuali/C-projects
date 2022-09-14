@@ -1,0 +1,103 @@
+const char *message = "HTTP/1.0 200 Document follows\r\n"
+"Server: MyAwesomeServer\r\n"
+"Content-type: text/html";
+write(slaveSocket, message, strlen(message));
+write(slaveSocket, "\r\n", 2);
+write(slaveSocket, "\r\n", 2);
+
+const char *message2a = "<html>\n <head>\n  <title>Index of ";
+const char *message2b = "</title>\n </head>\n <body>\n<h1>Index of ";
+const char *message2c = "</h1>\n<table><tr>";
+
+write(slaveSocket, message2a, strlen(message2a));
+write(slaveSocket, docpath, strlen(docpath));
+write(slaveSocket, message2b, strlen(message2b));
+write(slaveSocket, docpath, strlen(docpath));
+write(slaveSocket, message2c, strlen(message2c));
+
+const char *message2d ="<tr><th><img src=\"/icons/blue_ball.gif\" alt=\"[ICO]\">"
+"</th><th><a href=\"?C=N;O=D\">Name</a></th><th><a href=\"?C=M;"
+"O=A\">Last modified</a></th><th><a href=\"?C=S;O=A\">Size</a>"
+"</th><th><a href=\"?C=D;O=A\">Description</a></th></tr>"
+"<tr><th colspan=\"5\"><hr></th></tr>";
+
+const char *message2e = "<tr><td valign=\"top\"><img src=\"/icons/menu.gif\""
+" alt=\"[DIR]\"></td><td><a href=\"";
+const char *message2f = docpath;
+const char *message2g = "\">Parent Directory</a>       </td><td>&nbsp;"
+"</td><td align=\"right\">  - </td><td>&nbsp;</td></tr>";
+
+write(slaveSocket, message2d, strlen(message2d));
+write(slaveSocket, message2e, strlen(message2e));
+write(slaveSocket, message2f, strlen(message2f));
+write(slaveSocket, message2g, strlen(message2g));
+
+struct FileStats **files = (struct FileStats **)malloc(100*sizeof(struct FileStats));
+struct dirent *ch;
+int numFiles = 0;
+while ((ch = readdir(dir)) != NULL) {
+struct FileStats *f = (struct FileStats*)malloc(sizeof(struct FileStats));
+f->dir = ch;
+
+char *path = (char *)malloc(1024*sizeof(char));
+strcpy(path, docpath);
+if (path[strlen(path) - 1] != '/') {
+strcat(path, "/");
+}
+strcat(path, ch->d_name);
+f->p = path;
+
+char *dpath = (char *)malloc(1024*sizeof(char));
+strcpy(dpath, docpath);
+if (dpath[strlen(dpath) - 1] != '/') {
+strcat(dpath, "/");
+}
+strcat(dpath, ch->d_name);
+f->dp = dpath;
+
+struct stat buf;
+stat(path, &buf);
+f->b = buf;
+
+files[numFiles++] = f;
+}
+
+for (int i = 0; i < numFiles; i++) {
+
+
+const char *message3a;
+if (files[i]->dir->d_type == DT_DIR) {
+message3a = "<tr><td valign=\"top\"><img src=\"/icons/menu.gif\""
+" alt=\"[DIR]\"></td><td><a href=\"";
+} else {
+message3a = "<tr><td valign=\"top\"><img src=\"/icons/text.gif\""
+" alt=\"[   ]\"></td><td><a href=\"";
+}
+write(slaveSocket, message3a, strlen(message3a));
+write(slaveSocket, files[i]->dp, strlen(files[i]->dp));
+write(slaveSocket, "\">", strlen("\">"));
+write(slaveSocket, files[i]->dir->d_name, strlen(files[i]->dir->d_name));
+
+
+
+const char *message3b = "</a>               </td><td align=\"right\">";
+const char *message3c = ctime(&(files[i]->b.st_mtime));	//date modified
+const char *message3d = "</td><td align=\"right\">";
+const char *message3e = "0";
+const char *message3f = "</td><td>&nbsp;</td></tr>\n";
+
+write(slaveSocket, message3b, strlen(message3b));
+write(slaveSocket, message3c, strlen(message3c));
+write(slaveSocket, message3d, strlen(message3d));
+write(slaveSocket, message3e, strlen(message3e));
+write(slaveSocket, message3f, strlen(message3f));
+}
+
+const char *message4a = "<tr><th colspan=\"5\"><hr></th></tr>\n";
+const char *message4b = "</table>\n<address>Apache/2.2.24 (Unix) mod_ssl/2.2.24"
+"OpenSSL/0.9.8ze Server at www.cs.purdue.edu Port 22221";
+const char *message4d = "</address>\n</body></html>\n";
+
+write(slaveSocket, message4a, strlen(message4a));
+write(slaveSocket, message4b, strlen(message4b));
+write(slaveSocket, message4d, strlen(message4d));
