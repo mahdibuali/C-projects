@@ -1,0 +1,328 @@
+/* Name, alterations.c, CS 24000, Spring 2020
+ * Last updated April 9, 2020
+ */
+
+/* Add any includes here */
+
+#include "alterations.h"
+
+#include <string.h>
+
+/*Define change_event_octave here */
+
+int change_event_octave(event_t *event, int *octave) {
+
+  /* check type */
+
+  if ((event->type == SYS_EVENT_1) || (event->type == SYS_EVENT_2) ||
+      (event->type == META_EVENT)) {
+    return 0;
+  }
+
+  /* check name */
+
+  if ((strcmp("Note Off", event->midi_event.name) != 0) &&
+      (strcmp("Note On", event->midi_event.name) != 0) &&
+      (strcmp("Polyphonic Key", event->midi_event.name) != 0)) {
+    return 0;
+  }
+
+  /* get first data byte and check range */
+
+  int new_octave = *(event->midi_event.data) + (*octave *  OCTAVE_STEP);
+  if ((new_octave < 0) || (new_octave > 127)) {
+    return 0;
+  }
+  *(event->midi_event.data) = (uint8_t)new_octave;
+  return 1;
+}
+
+unsigned long get_vlq(uint32_t number) {
+  uint8_t bytes[5];
+  bytes[4] = number & 0x7F;
+  bytes[3] = (number >> 7) & 0x7F;
+  bytes[3] = bytes[3] | 0x80;
+  bytes[2] = (number >> 14) & 0x7F;
+  bytes[2] = bytes[2] | 0x80;
+  bytes[1] = (number >> 21) & 0x7F;
+  bytes[1] = bytes[1] | 0x80;
+  bytes[0] = (number >> 28) & 0x7F;
+  bytes[0] = bytes[0] | 0x80;
+
+  unsigned long result = 0;
+  int first_index = 0;
+
+  for (int i = 0; i < 5; i++) {
+    if (bytes[i] == 0x80) {
+      first_index++;
+    }
+    else {
+      break;
+    }
+  }
+  for (int i = first_index; i < 5; i++) {
+    result = result + bytes[i];
+    if (i != 4) {
+      result = result << 8;
+    }
+  }
+  return result;
+}
+
+int num_of_bytes(unsigned long num) {
+  int result = 0;
+  while (num != 0) {
+    result++;
+    num = num >> 8;
+  }
+  return result;
+}
+
+int main() {
+  printf("number = %lX\n", get_vlq(0xDECAFBAD));
+  printf("size %lu\n", sizeof(long));
+}
+
+
+/*Define change_event_time here */
+
+int change_event_time(event_t *event, float *multi) {
+  int old_time = num_of_bytes(get_vlq(event->delta_time));
+  event->delta_time = event->delta_time * *multi;
+  int new_time = num_of_bytes(get_vlq(event->delta_time));
+  return new_time - old_time;
+}
+
+/*Define change_event_instrument here */
+
+int change_event_instrument(event_t *event, remapping_t table) {
+
+  /* check type */
+
+  if ((event->type == SYS_EVENT_1) || (event->type == SYS_EVENT_2) ||
+      (event->type == META_EVENT)) {
+    return 0;
+  }
+
+  /* check name */
+
+  if (strcmp("Program Change", event->midi_event.name) != 0) {
+    return 0;
+  }
+
+  /* get first data byte and check range */
+
+  *(event->midi_event.data) = table[*(event->midi_event.data)];
+  return 1;
+}
+
+/*Define change_event_note here */
+int change_event_note(event_t *event, remapping_t table) {
+  /* check type */
+
+  if ((event->type == SYS_EVENT_1) || (event->type == SYS_EVENT_2) ||
+      (event->type == META_EVENT)) {
+    return 0;
+  }
+
+  /* check name */
+
+  if ((strcmp("Note Off", event->midi_event.name) != 0) &&
+      (strcmp("Note On", event->midi_event.name) != 0) &&
+      (strcmp("Polyphonic Key", event->midi_event.name) != 0)) {
+    return 0;
+  }
+
+  *(event->midi_event.data) = table[*(event->midi_event.data)];
+  return 1;
+}
+
+/*Define apply_to_events here */
+int apply_to_events(song_data_t *song, event_func_t func, void *data) {
+  int result = 0;
+  track_node_t *current_track = song->track_list;
+  while (current_track != NULL) {
+    event_node_t *current_event = current_track->track->event_list;
+    while (current_event != NULL) {
+      if (func(current_event->event, data) == 1) {
+        result++;
+      }
+      current_event = current_event->next_event;
+    }
+    current_track = current_track->next_track;
+  }
+  return result;
+}
+
+/*Define change_octave here */
+int change_octave(song_data_t *song, int octave) {
+  return apply_to_events(song, (event_func_t)change_event_octave, (void *)(&octave));
+}
+
+/*Define warp_time here */
+int warp_time(song_data_t *song, float multi) {
+  int result = 0;
+  track_node_t *current_track = song->track_list;
+  while (current_track != NULL) {
+    event_node_t *current_event = current_track->track->event_list;
+    int bytes_diff = 0;
+    while (current_event != NULL) {
+      bytes_diff = bytes_diff + change_event_time(current_event->event, &multi);
+      current_event = current_event->next_event;
+    }
+    current_track->track->length += bytes_diff;
+    result += bytes_diff;
+    current_track = current_track->next_track;
+  }
+  return result;
+}
+
+/*Define remap_instruments here */
+int remap_instruments(song_data_t *song, remapping_t table) {
+  return apply_to_events(song, (event_func_t)change_event_instrument, (void *)(table));
+}
+
+
+/*Define remap_notes here */
+int remap_notes(song_data_t *song, remapping_t table) {
+  return apply_to_events(song, (event_func_t)change_event_note, (void *)(table));
+}
+
+
+track_node_t *duplicate_track(track_node_t *original_track) {
+
+  /* create track node */
+
+  track_node_t *new_track_node = malloc(sizeof(track_node_t));
+  assert(new_track_node);
+  new_track_node->next_track = NULL;
+
+  /* create track */
+
+  new_track_node->track = malloc(sizeof(track_t));
+  assert(new_track_node->track);
+  new_track_node->track->length = original_track->track->length;
+
+  /* create event list */
+
+  event_node_t *head_event_node = NULL;
+  event_node_t *prev_event_node = NULL;
+  event_node_t *current_event_node = original_track->track->event_list;
+  while (current_event_node) {
+
+    /* create event node */
+
+    event_node_t *new_event_node = malloc(sizeof(event_node_t));
+    assert(new_event_node);
+    new_event_node->next_event = NULL;
+    if (head_event_node == NULL) {
+      head_event_node = new_event_node;
+    }
+    if (prev_event_node) {
+      prev_event_node->next_event = new_event_node;
+    }
+
+    /* create event */
+
+    event_t new_event = malloc(sizeof(event_t));
+    assert(new_event);
+    new_event->delta_time = current_event_node->event->delta_time;
+    new_event->type = current_event_node->event->type;
+
+    /* check type */
+
+    if ((new_event->type == SYS_EVENT_1) || (new_event->type == SYS_EVENT_1)) {
+      new_event->sys_event.data_len = current_event_node->event->sys_event.data_len;
+      if (new_event->sys_event.data_len) {
+        new_event->sys_event.data = calloc(sizeof(uint8_t), new_event->sys_event.data_len);
+        assert(new_event->sys_event.data);
+        for (int i = 0; i < new_event->sys_event.data_len; i++) {
+          *(new_event->sys_event.data + i) = *(current_event_node->event->sys_event.data + i);
+        }
+      }
+    }
+    else if (new_event->type == META_EVENT) {
+      new_event->meta_event.name = malloc(strlen(current_event_node->event->meta_event.name) + 1);
+      assert(new_event->meta_event.name);
+      strcpy(new_event->meta_event.name, current_event_node->event->meta_event.name);
+      new_event->meta_event.data_len = current_event_node->event->meta_event.data_len;
+      if (new_event->meta_event.data_len) {
+        new_event->meta_event.data = calloc(sizeof(uint8_t), new_event->meta_event.data_len);
+        assert(new_event->meta_event.data);
+        for (int i = 0; i < new_event->meta_event.data_len; i++) {
+          *(new_event->meta_event.data + i) = *(current_event_node->event->meta_event.data + i);
+        }
+      }
+    }
+    else {
+      new_event->midi_event.name = malloc(strlen(current_event_node->event->midi_event.name) + 1);
+      assert(new_event->mi_event.name);
+      strcpy(new_event->meta_event.name, current_event_node->event->meta_event.name);
+      new_event->meta_event.data_len = current_event_node->event->meta_event.data_len;
+      if (new_event->meta_event.data_len) {
+        new_event->meta_event.data = calloc(sizeof(uint8_t), new_event->meta_event.data_len);
+        assert(new_event->meta_event.data);
+        for (int i = 0; i < new_event->meta_event.data_len; i++) {
+          *(new_event->meta_event.data + i) = *(current_event_node->event->meta_event.data + i);
+        }
+      }
+    }
+
+    /* assign event and update variable */
+
+    new_event_node->event = new_event;
+    current_event_node = current_event_node->next_event;
+    prev_event_node = new_event_node;
+  }
+
+
+/*Define add_round here */
+void add_round(song_data_t *p, int e, int i, unsigned int z, uint8_t a) {
+
+  /* duplicate the track */
+
+  
+
+  /* change octave */
+
+  /* delay the first event */
+
+  /* update the track length */
+
+  /* convert its instrumentation */
+
+  /* add to the end of track list */
+
+  /* update the number of tracks */
+
+  /* update the format */
+
+  /* find the smallest unused channel in the song */
+
+}
+/*
+ * Function called prior to main that sets up random mapping tables
+ */
+
+void build_mapping_tables()
+{
+  for (int i = 0; i <= 0xFF; i++) {
+    I_BRASS_BAND[i] = 61;
+  }
+
+  for (int i = 0; i <= 0xFF; i++) {
+    I_HELICOPTER[i] = 125;
+  }
+
+  for (int i = 0; i <= 0xFF; i++) {
+    N_LOWER[i] = i;
+  }
+  //  Swap C# for C
+  for (int i = 1; i <= 0xFF; i += 12) {
+    N_LOWER[i] = i-1;
+  }
+  //  Swap F# for G
+  for (int i = 6; i <= 0xFF; i += 12) {
+    N_LOWER[i] = i+1;
+  }
+} /* build_mapping_tables() */
